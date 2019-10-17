@@ -1,0 +1,207 @@
+---
+params:
+  ClinRole: "Clinical Social Work Coordinator"
+  StartDate: "08/01/2019"
+  EndDate: "10/01/2019"
+title: "STEP Metrics Across All Schools: August 2019 - September 2019"
+author: "Jessica Streeter, Data Scientist | Data Informatics, CBH"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output: 
+  pdf_document: 
+    latex_engine: xelatex
+classoption: landscape
+header-includes:
+- \usepackage{booktabs}
+- \usepackage{longtable}
+- \usepackage{array}
+- \usepackage{multirow}
+- \usepackage{wrapfig}
+- \usepackage{float}
+- \usepackage{colortbl}
+- \usepackage{pdflscape}
+- \usepackage{tabu}
+- \usepackage{threeparttable}
+- \usepackage{threeparttablex}
+- \usepackage[normalem]{ulem}
+- \usepackage{makecell}
+- \usepackage{xcolor}
+
+
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, message = F)
+knitr::opts_chunk$set(fig.width = 11, fig.height = 7.5, fig.align = "center")
+
+options(tinytex.verbose = TRUE) #long form errors issued for latex
+options(kableExtra.latex.load_packages = FALSE) #need this to get kableextra and tinytex to play nice
+options(knitr.table.format = "latex")
+
+#Libraries####
+library(tidyverse)
+library(data.table)
+library(zoo)
+library(kableExtra)
+library(lubridate)
+library(magrittr)
+
+#reading data####
+STEPfinal <- readRDS(paste0("STEPfinal_", format(zoo::as.yearmon(Sys.Date()), format = "%b-%Y"))) 
+
+STEPfinal <- STEPfinal %>% filter(EncounterDate <= as.Date(params$EndDate, format = "%m/%d/%Y"),
+                                  EncounterDate >= as.Date(params$StartDate, format = "%m/%d/%Y"))
+
+```
+# STEP Staff Role: `r params$ClinRole`s
+
+
+#### Summary Statistics
+All data from `r format(as.Date(params$StartDate, format = "%m/%d/%Y"), "%B %Y")` through `r format(as.Date(params$EndDate, format = "%m/%d/%Y"), "%B %Y")`
+
+* Total Number of School-Specific Activities: `r nrow(STEPfinal[STEPfinal$ClinRole2 == params$ClinRole & is.na(STEPfinal$TaskType) == F & STEPfinal$TaskCat == "School" & STEPfinal$EncounterDate < as.Date(params$EndDate, "%m/%d/%Y"),])` 
+* Total Number of Child-Specific Activities: `r nrow(STEPfinal[STEPfinal$ClinRole2 == params$ClinRole & is.na(STEPfinal$TaskType) == F & STEPfinal$TaskCat == "Child" & STEPfinal$EncounterDate < as.Date(params$EndDate, "%m/%d/%Y"),])` 
+* Number of Unique Children Served: `r length(unique(STEPfinal$ChildID[STEPfinal$ClinRole2 == params$ClinRole & is.na(STEPfinal$TaskType) == F & STEPfinal$TaskCat == "Child" & STEPfinal$EncounterDate < as.Date(params$EndDate, "%m/%d/%Y")]))`
+
+#### Data Notes
+
+* All data reported by STEP programs through form.com.
+* The number of distinct children is an approximate, as some data points include more than one child.
+* Elapsed times that were less than zero were removed, as they were likely data entry errors.
+* There were instances of tasks being entered with no times or incomplete time information.  These data points were removed. 
+* Data with no encounter date or school name were removed.
+* Collateral contacts with family, teachers, and other supports were grouped into "Collateral Contacts" for figures only.
+* Collateral family therapy, family therapy with child, group therapy, and individual therapy were grouped into "Therapy" for figures only.
+
+\newpage
+```{r FIG1 School Metrics}
+#School Specific Metric Figures####
+STEPfinal %>% 
+  filter(TaskCat == "School") %>% 
+  mutate(YMencounter = as.yearmon(EncounterDate),
+         TaskType_Cat = as.factor(ifelse(TaskType %in% c("Collateral Contact with Family", "Collateral Contact with Other Supports",
+                                                         "Collateral Contact with Teacher"), 'Collateral Contacts',
+                                         ifelse(TaskType %in% c("Collateral Family Therapy (Without Child)", "Family Therapy w/Child", 
+                                                                "Group Therapy", "Individual Therapy w/Child"), "Therapy", as.character(TaskType))))) %>% 
+  group_by(ClinRole2, YMencounter, TaskCat, TaskType_Cat) %>% 
+  summarize(TotalTime = round(sum(TimeElapsed)/3600,1), #Note: 4 cases where timeelapsed is NA
+            TotalEntries = n(),
+            NDistinctKids = n_distinct(ChildID)) %>% 
+  filter(ClinRole2 == params$ClinRole) %>% 
+  ggplot(aes(x = YMencounter, y = TotalTime, group = TaskType_Cat, fill = TaskType_Cat)) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_label(aes(label = paste0(TotalTime, "H; ", "N = ", TotalEntries)), 
+             position = position_stack(vjust = .5), 
+             size = 3, color = "black", alpha = .3, fill = "white", 
+             show.legend = NA, label.size = 0, label.padding = unit(.1, "lines")) +
+  scale_x_yearmon(breaks = seq(from = as.yearmon(as.Date(params$StartDate, format = "%m/%d/%Y")), 
+                               to = as.yearmon(as.Date(params$EndDate, format = "%m/%d/%Y")),
+                               by = 1/12)) +
+  #scale_y_time(breaks = seq(0,48*60*60, 8*60*60)) + #bc data is stored in seconds
+  scale_fill_viridis_d(option = "D") +
+  #theme(axis.text.x = element_text(angle= 45, hjust = 1)) +
+  labs(title = "Time Spent on School-Specific Tasks Across All Schools",
+       subtitle = paste0("Staff Role: ", params$ClinRole),
+       x = "Month of Service",
+       y = "Total Time (Hours)",
+       fill = "Task Category",
+       caption = "N: Total Number of Encounters") +
+  theme(legend.position = "bottom")
+```
+\newpage
+```{r FIG2 Child Metrics}
+#Child Specific Metric Figures####
+STEPfinal %>% 
+  filter(TaskCat == "Child") %>% 
+  mutate(YMencounter = as.yearmon(EncounterDate),
+         TaskType_Cat = as.factor(ifelse(TaskType %in% c("Collateral Contact with Family", "Collateral Contact with Other Supports",
+                                                  "Collateral Contact with Teacher"), 'Collateral Contacts',
+                                  ifelse(TaskType %in% c("Collateral Family Therapy (Without Child)", "Family Therapy w/Child", 
+                                                         "Group Therapy", "Individual Therapy w/Child"), "Therapy", as.character(TaskType))))) %>% 
+  group_by(ClinRole2, YMencounter, TaskCat, TaskType_Cat) %>% 
+  summarize(TotalTime = round(sum(TimeElapsed)/3600,1), #Note: 4 cases where timeelapsed is NA
+            TotalEntries = n(),
+            NDistinctKids = n_distinct(ChildID)) %>% 
+  filter(ClinRole2 == params$ClinRole) %>% 
+  ggplot(aes(x = YMencounter, y = TotalTime, group = TaskType_Cat, fill = TaskType_Cat)) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_label(aes(label = paste0(TotalTime,"H; N = ", NDistinctKids)), 
+            position = position_stack(vjust = .5), 
+            size = 2.5, color = "black", alpha = .3, fill = "white", 
+            show.legend = NA, label.size = 0, label.padding = unit(.1, "lines")) +
+  scale_x_yearmon(breaks = seq(from = as.yearmon(as.Date(params$StartDate, format = "%m/%d/%Y")), 
+                               to = as.yearmon(as.Date(params$EndDate, format = "%m/%d/%Y")),
+                               by = 1/12)) +
+  #scale_y_time(breaks = seq(0,48*60*60, 8*60*60)) + #bc data is stored in seconds
+  scale_fill_viridis_d(option = "E") +
+  #theme(axis.text.x = element_text(angle= 45, hjust = 1)) +
+  labs(title = "Time Spent on Child-Specific Tasks Across All Schools",
+       subtitle = paste0("Staff Role: ", params$ClinRole),
+       x = "Month of Service",
+       y = "Total Time (Hours)",
+       fill = "Task Category",
+       caption = "'Therapy' and 'Collateral Contacts' were aggregated from more detailed datan\
+       N: Number of Unique Kids") +
+  theme(legend.position = "bottom")
+
+```
+
+\newpage
+```{r Table1 SUmmary Data}
+#summarytable for overall monthly hours.
+
+STEPfinal %>% 
+  mutate(YMencounter = as.yearmon(EncounterDate),
+         TimeElapsed = as.ITime(TimeElapsed)) %>% 
+  group_by(ClinRole2, YMencounter, TaskCat) %>% 
+  summarize(TotalTime = round(sum(TimeElapsed)/3600,2), #Note: 4 cases where timeelapsed is NA
+            TotalEntries = n(),
+            NDistinctKids = n_distinct(ChildID)) %>% 
+  mutate(NDistinctKids = ifelse(TaskCat == "Child", NDistinctKids, NA)) %>% 
+  filter(ClinRole2 == params$ClinRole) %>% #, YMencounter == MonthParam) %>% 
+  arrange(YMencounter) %>% 
+  ungroup() %>% 
+  select(YMencounter, TaskCat, TotalTime, TotalEntries, NDistinctKids) %>%  #for specifying row groupings
+  mutate(NDistinctKids = cell_spec(NDistinctKids, "latex", color = ifelse(is.na(NDistinctKids) == T, "white", "black"), align = "r")) %>% 
+  rename("Encounter Month" = YMencounter,
+          "Total Time(H)" = TotalTime,
+          "Task Group" = TaskCat,
+         "Total Entries" = TotalEntries,
+         "N Unique Children" = NDistinctKids) %>% 
+  kable(booktabs = T, escape = F, linesep = "",
+        caption = paste0("Monthly Summary Data for ", params$ClinRole, " Across All Schools")) %>% 
+  kable_styling(latex_options = c("condensed", "striped"), full_width = F) %>%
+  column_spec(1, bold = T, italic = T) %>% 
+  collapse_rows(columns = 1, latex_hline = "major", valign = "middle")
+
+```
+
+```{r Table2 Detailed Data}
+#SummaryTable 
+STEPfinal %>% 
+  mutate(YMencounter = as.yearmon(EncounterDate)) %>% 
+  group_by(ClinRole2, YMencounter, TaskCat, TaskType) %>% 
+  summarize(TotalTime = round(sum(TimeElapsed)/3600,2), #Note: 4 cases where timeelapsed is NA
+            TotalEntries = n(),
+            NDistinctKids = n_distinct(ChildID)) %>% 
+  mutate(NDistinctKids = ifelse(TaskCat == "Child", NDistinctKids, NA)) %>% 
+  filter(ClinRole2 == params$ClinRole) %>% #, YMencounter == MonthParam) %>%
+  spread(key = TaskCat, value = TotalTime) %>% 
+  arrange(YMencounter, School, TaskType) %>% 
+  ungroup() %>% 
+  select(YMencounter, TaskType, School,Child,TotalEntries, NDistinctKids) %>% #for specifying row groupings
+  mutate(School = cell_spec(School, "latex", color = ifelse(is.na(School) == T, "white", "black"), align = "r"),
+         Child = cell_spec(Child, "latex", color = ifelse(is.na(Child) == T, "white", "black"), align = "r"),
+         NDistinctKids = cell_spec(NDistinctKids, "latex", color = ifelse(is.na(NDistinctKids) == T, "white", "black"), align = "r")) %>% 
+  #select(TaskType_Cat, School,Child,TotalEntries, NDistinctKids) %>% 
+  rename("        " = YMencounter,
+         Task = TaskType,
+         "School: Total Time(H)" = School,
+         "Child: Total Time(H)" = Child,
+         "Total Entries" = TotalEntries,
+         "N Unique Children" = NDistinctKids) %>%  
+  kable(longtable = T, booktabs = T, escape = F, linesep = "", 
+        caption = paste0("Detailed Data for ", params$ClinRole, " Across All Schools")) %>% 
+  kable_styling(latex_options = c("scale_down", "striped", "repeat_header")) %>%
+  column_spec(1, bold = TRUE, italic = TRUE) %>% 
+  collapse_rows(columns = 1, latex_hline = "major", valign = "middle")
+  
+```
